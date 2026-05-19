@@ -4,6 +4,7 @@ cluster_version = "1.33"
 
 instance_type = "t3.micro"
 
-desired_size = 1
+min_size     = 2
+desired_size = 2
 max_size     = 2
-min_size     = 1
+

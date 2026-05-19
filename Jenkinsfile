@@ -7,20 +7,28 @@ pipeline {
         ECR_REPO = 'demo-app'
         IMAGE_TAG = "${BUILD_NUMBER}"
         ECR_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
+        CLUSTER_NAME = 'demo-eks-cluster'
+        NAMESPACE = 'demo-app'
+        DEPLOYMENT_NAME = 'demo-app'
     }
 
     stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
 
-        stage('Build Docker Image') {
+        stage('Build AMD64 Docker Image') {
             steps {
                 sh '''
-                cd app
-
-                docker build -t ${ECR_REPO}:${IMAGE_TAG} .
-
-                docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_URI}:${IMAGE_TAG}
-
-                docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_URI}:latest
+                docker buildx build \
+                  --platform linux/amd64 \
+                  -t ${ECR_REPO}:${IMAGE_TAG} \
+                  -t ${ECR_URI}:${IMAGE_TAG} \
+                  -t ${ECR_URI}:latest \
+                  --load \
+                  ./app
                 '''
             }
         }
@@ -39,8 +47,30 @@ pipeline {
             steps {
                 sh '''
                 docker push ${ECR_URI}:${IMAGE_TAG}
-
                 docker push ${ECR_URI}:latest
+                '''
+            }
+        }
+
+        stage('Update Kubeconfig') {
+            steps {
+                sh '''
+                aws eks update-kubeconfig \
+                  --region ${AWS_REGION} \
+                  --name ${CLUSTER_NAME}
+                '''
+            }
+        }
+
+        stage('Deploy to EKS') {
+            steps {
+                sh '''
+                kubectl set image deployment/${DEPLOYMENT_NAME} \
+                  demo-app=${ECR_URI}:${IMAGE_TAG} \
+                  -n ${NAMESPACE}
+
+                kubectl rollout status deployment/${DEPLOYMENT_NAME} \
+                  -n ${NAMESPACE}
                 '''
             }
         }
@@ -48,11 +78,11 @@ pipeline {
 
     post {
         success {
-            echo 'Docker image pushed successfully to AWS ECR'
+            echo 'CI/CD completed: image pushed to ECR and deployed to EKS.'
         }
 
         failure {
-            echo 'Pipeline failed'
+            echo 'Pipeline failed. Check console output.'
         }
     }
 }
